@@ -75,3 +75,21 @@
   (helper number 10)
   )
 
+;Converts binary to decimal
+(define (bin-to-dec number)
+  (define (helper sum currNum deg)
+    (if (< currNum 10) (+ sum (* currNum (expt 2 deg)))
+        (helper (+ sum (* (remainder currNum 10) (expt 2 deg))) (quotient currNum 10) (+ deg 1))))
+  (helper 0 number 0)
+)
+
+;Converts decimal to binary
+(define (dec-to-bin number)
+  (define (helper sum currNum tens)
+    (if (= (quotient currNum 2) 0) (+ sum (* currNum tens))
+       (helper (+ sum (* (remainder currNum 2) tens)) (quotient currNum 2) (* tens 10))))
+  (helper 0 number 1)
+)
+
+
+
