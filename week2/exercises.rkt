@@ -1,3 +1,12 @@
+(define (fib n)
+  (define (helper fib1 fib2 i)
+    (if(= i n)
+       fib2
+       (helper fib2 (+ fib2 fib1) (+ i 1)))
+    )
+  (helper 0 1 0)
+  )
+
 (define (sum-iter start end)  
   (define (for sum curr final)
       (if (= curr final)
