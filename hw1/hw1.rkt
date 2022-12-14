@@ -23,13 +23,14 @@
 (define (get-max-all a b)
   (accumulate (lambda (x y) (if(> (count-divs-pair x) (count-divs-pair y)) x y)) '() a b (lambda(x) (get-max-pair x b)) (lambda(x) (+ 1 x))))
 
+
 ; Problem 3
 (define (square x) (* x x))
 
 (define (integral a b f dx y)
 (* dx (accumulate + 0 a b (lambda (x) (f x y)) (lambda (x) (+ x dx)))))
 (define (integrate2 f a b c d dx dy)
-  (accumulate + 0 c d (lambda (y) (integral a b f dx y)) (lambda(x) (+ x 1))))
+  (* dy (accumulate + 0 c d (lambda (y) (integral a b f dx y)) (lambda(y) (+ y dy)))))
 
 (define pi 3.14159265359)
 (define (f x y) (+ x (sin y) 1))
@@ -47,10 +48,8 @@
 (define (cols-helper col n lst)
   (accumulate + 0 0 (- n 1) (lambda (x) (if(list? (member (cons x col) lst)) 1 0)) (lambda (x) (+ 1 x))))
 
-(define (my-and x y) (and x y))
-
 (define (n-rooks board n)
-  (accumulate my-and #t 0 (- n 1) (lambda(x) (if(and (= (rows-helper x n board) 1) (= (cols-helper x n board) 1)) #t #f)) (lambda(x) (+ x 1))))
+  (accumulate (lambda (x y) (and x y)) #t 0 (- n 1) (lambda(x) (if(and (= (rows-helper x n board) 1) (= (cols-helper x n board) 1)) #t #f)) (lambda(x) (+ x 1))))
 
 (n-rooks board1 5)
 (n-rooks board2 5)
