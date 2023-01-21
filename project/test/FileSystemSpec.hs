@@ -1,6 +1,7 @@
 {- ORMOLU_DISABLE -}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase #-}
 
 module FileSystemSpec (fileSystemSpec) where
 
@@ -24,6 +25,8 @@ fileSystemSpec = describe "FileSystem" do
   rewriteFileContentSpec
   getDirNameSpec
   getDirChildrenSpec
+  printDirectorySpec
+  pwdSpec
 
 strToPathSpec :: Spec
 strToPathSpec = describe "strToPath" do
@@ -62,14 +65,16 @@ getDirChildrenSpec = describe "getDirChildren" do
     getDirChildren dir
       `shouldBe` children
 
--- findSpec :: Spec
--- findSpec = describe "find" do
---   prop "correctly return file with type F" \path F tree ->
---     find path F tree
---       `shouldSatisfy` isJust
---   prop "correctly return dir with type D" \path D tree ->
---     find path D tree
---       `shouldSatisfy` isJust
---   prop "correctly return same tree if path is empty" \([]::String) t tree ->
---     find [] t tree 
---       `shouldBe` Just tree
+printDirectorySpec :: Spec
+printDirectorySpec = describe "printDirectory" do
+  prop "correctly print the dir contents" \dir@(Dir _ children) ->
+    printDirectory dir
+      `shouldBe` concatMap (\i -> case i of
+    File rf -> getFileName rf ++ " "
+    Directory dir' -> getDirName dir' ++ " ") children
+
+pwdSpec :: Spec
+pwdSpec = describe "pwd" do
+  prop "correctly print the working directory" \path ->
+    pwd path
+      `shouldBe` pwd (strToPath (pwd path))

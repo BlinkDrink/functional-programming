@@ -248,6 +248,7 @@ parseCdArgs :: Path -> Arg -> Maybe CdArgs
 parseCdArgs [] _ = Nothing
 parseCdArgs workingDir [] = Just $ CdArgs workingDir
 parseCdArgs workingDir arg@(x : _)
+  | x == '/' && needsToBeCleaned (strToPath arg) = go (strToPath arg)
   | x == '/' = Just $ CdArgs $ strToPath arg
   | needsToBeCleaned (strToPath arg) = go (relativeToFullPath workingDir (strToPath arg))
   | otherwise = Just $ CdArgs (workingDir ++ strToPath arg)
@@ -321,6 +322,7 @@ catFilesToString :: FileTree -> NonEmpty Path -> Maybe String
 catFilesToString tree (lead :| rest) =
   Just $ foldl (\acc x -> case findFileByPath x tree of Just f -> acc ++ "\n" ++ getFileContent f; _ -> "") (maybe "" getFileContent (findFileByPath lead tree)) rest
 
+-- accepts path to file -> new content -> file tree in which the file exists -> returns a tree in which there is a rewritten file with the new content
 catOutputRewrite :: Path -> String -> FileTree -> FileTree
 catOutputRewrite [] _ f@(File _) = f
 catOutputRewrite [] _ dir@(Directory _) = dir
@@ -330,11 +332,13 @@ catOutputRewrite _ _ f@(File (RegularFile _ _)) = f
 catOutputRewrite (_ : rest) newContent (Directory (Dir dirName children)) = Directory (Dir dirName (map (catOutputRewrite rest newContent) children))
 
 -- >>> cat (Files (fromList [["/","dir1","file1"], ["/","dir2","file5"]])) smallTree
--- Just "\nfile1\nfile5"
+-- Variable not in scope: fromList :: [[String]] -> NonEmpty Path
 cat :: CatArgs -> FileTree -> Maybe String
 cat (FileArgs files) tree = if any (\f -> isNothing $ findFileByPath f tree) files then Nothing else catFilesToString tree files
 cat (OutputArgs path newContent) tree = if isNothing $ findFileByPath path tree then Nothing else Just newContent
-cat (Both files _) tree = if any (\f -> isNothing $ findFileByPath f tree) files then Nothing else catFilesToString tree files
+cat (Both files output) tree = case findFileByPath output tree of
+  Nothing -> Nothing
+  _ -> maybe Nothing Just (catFilesToString tree files) -- if any (\f -> isNothing $ findFileByPath f tree) files || null output then Nothing else catOutputRewrite output (catFilesToString tree files)
 
 ------------------rm------------------
 
@@ -371,9 +375,61 @@ rm (RmArgs args) tree =
     then Nothing
     else foldl (\acc x -> case acc of Just currTree -> remove x currTree; _ -> acc) (Just tree) args
 
-----------------------main----------------------
+---------------------touch----------------------
 
-data Command = Pwd | Ls LsArgs | Cd CdArgs | Cat PartialCatArgs | Rm RmArgs | Exit
+newtype TouchArgs = TouchArgs (NonEmpty Path)
+  deriving (Eq, Show)
+
+parseTouchArgs :: Path -> [String] -> Maybe TouchArgs
+parseTouchArgs [] _ = Nothing
+parseTouchArgs _ [] = Nothing
+parseTouchArgs path args = case mapMaybe (cdParseTweaker path) args of
+  (c : cs) -> Just $ TouchArgs (NonEmpty.map cdPath (c :| cs))
+  _ -> Nothing
+
+createFile :: Path -> FileTree -> Maybe FileTree
+createFile [] f@(File _) = Just f
+createFile [] dir@(Directory _) = Just dir
+createFile [p, _] f@(File (RegularFile nm _)) = if nm == p then Nothing else Just f
+createFile [p, pNext] dir@(Directory (Dir nm children)) = if nm == p then Just $ Directory (Dir nm (File (RegularFile pNext "") : mapMaybe (createFile []) children)) else Just dir
+createFile _ file@(File _) = Just file
+createFile (_ : rest) (Directory (Dir nm children)) = Just $ Directory (Dir nm (mapMaybe (createFile rest) children))
+
+touch :: TouchArgs -> FileTree -> Maybe FileTree
+touch (TouchArgs args) tree =
+  if any (\f -> isJust (findFileByPath f tree) && isJust (findDirByPath f tree)) args
+    then Nothing
+    else foldl (\acc x -> case acc of Just currTree -> createFile x currTree; _ -> acc) (Just tree) args
+
+---------------------mkdir----------------------
+
+newtype MkDirArgs = MkDirArgs (NonEmpty Path)
+  deriving (Eq, Show)
+
+parseMkDirArgs :: Path -> [String] -> Maybe MkDirArgs
+parseMkDirArgs [] _ = Nothing
+parseMkDirArgs _ [] = Nothing
+parseMkDirArgs path args = case mapMaybe (cdParseTweaker path) args of
+  (c : cs) -> Just $ MkDirArgs (NonEmpty.map cdPath (c :| cs))
+  _ -> Nothing
+
+createDir :: Path -> FileTree -> Maybe FileTree
+createDir [] f@(File _) = Just f
+createDir [] dir@(Directory _) = Just dir
+createDir [p, _] f@(File (RegularFile nm _)) = if nm == p then Nothing else Just f
+createDir [p, pNext] dir@(Directory (Dir nm children)) = if nm == p then Just $ Directory (Dir nm (Directory (Dir pNext []) : mapMaybe (createDir []) children)) else Just dir
+createDir _ file@(File _) = Just file
+createDir (_ : rest) (Directory (Dir nm children)) = Just $ Directory (Dir nm (mapMaybe (createDir rest) children))
+
+mkdir :: MkDirArgs -> FileTree -> Maybe FileTree
+mkdir (MkDirArgs args) tree =
+  if any (\f -> isJust (findFileByPath f tree) && isJust (findDirByPath f tree)) args
+    then Nothing
+    else foldl (\acc x -> case acc of Just currTree -> createDir x currTree; _ -> acc) (Just tree) args
+
+---------------------main-----------------------
+
+data Command = Pwd | Ls LsArgs | Cd CdArgs | Cat PartialCatArgs | Rm RmArgs | Touch TouchArgs | MkDir MkDirArgs | Exit
   deriving (Eq, Show)
 
 readInput :: IO String
@@ -410,6 +466,12 @@ parseCommand path cmd = case Split.splitOn " " cmd of
   ("rm" : xs) -> case parseRmArgs path xs of
     Nothing -> Nothing
     Just rmArgs -> Just $ Rm rmArgs
+  ("touch" : xs) -> case parseTouchArgs path xs of
+    Nothing -> Nothing
+    Just touchArgs -> Just $ Touch touchArgs
+  ("mkdir" : xs) -> case parseMkDirArgs path xs of
+    Nothing -> Nothing
+    Just mkdirArgs -> Just $ MkDir mkdirArgs
   _ -> Nothing
 
 data FileSystemState = MkFileSystemState
@@ -452,7 +514,13 @@ interaction fss = do
       Rm rmArgs -> case rm rmArgs (fs fss) of
         Nothing -> do putStrLn "rm: some of the files couldn't be found"; interaction fss
         Just ft -> interaction (MkFileSystemState (activeDir fss) ft)
+      Touch touchArgs -> case touch touchArgs (fs fss) of
+        Nothing -> do putStrLn "touch: some of the files couldn't be found"; interaction fss
+        Just ft -> interaction (MkFileSystemState (activeDir fss) ft)
+      MkDir mkdirArgs -> case mkdir mkdirArgs (fs fss) of
+        Nothing -> do putStrLn "mkdir: some of the directories couldn't be created. Check if the given path exists."; interaction fss
+        Just ft -> interaction (MkFileSystemState (activeDir fss) ft)
       Exit -> putStrLn "Exiting..."
 
 main :: IO ()
-main = interaction (MkFileSystemState root bigTree)
+main = interaction (MkFileSystemState root smallTree)
